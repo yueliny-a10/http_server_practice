@@ -21,7 +21,7 @@ typedef unsigned char           u8;
 #define    u16	unsigned short
 #define    u8	unsigned char 
 
-#define HTML_PATH "/var/www/html"
+#define HTML_FILE_PATH "/var/www/html"
 
 
 /* http request method definition */
@@ -31,7 +31,7 @@ typedef unsigned char           u8;
 #define POST		2
 #define PUT		3
 #define DELET		4
-#define CONNECT		5/
+#define CONNECT		5
 #define OPTIONS		6
 #define TRACE		7
 #define PATCH		8
@@ -67,7 +67,7 @@ struct http_hdr_info {
 	int req_method;
 	char http_version[4];
 	int http_status_code;
-	char req_url[128];
+	char req_target[128];
 	u32 host_ip;
 	u16 host_port;
 	char *msg_hdr;
@@ -77,9 +77,8 @@ struct http_hdr_info {
 
 enum http_hdr_state { start, req_line, msg_hdr, msg_body, CR, LF }; 
 
-char resp_buff[65535] = {'\0'};
+char resp_body[2048] = {'\0'};
 
-FILE *fin, *fout;
 
 void http_req_hdr_parser(char *buff, struct http_hdr_info *http_req_hdr) {
 
@@ -90,15 +89,13 @@ void http_req_hdr_parser(char *buff, struct http_hdr_info *http_req_hdr) {
 	enum http_hdr_state curr_state = start;
 	/*
 	struct http_hdr_info *http_hdr = (struct http_hdr_info *)malloc(sizeof(struct http_hdr_info));
-	memset(http_hdr->req_url, '\0', sizeof(http_hdr->req_url));
+	memset(http_hdr->req_target, '\0', sizeof(http_hdr->req_target));
 	memset(http_hdr->http_version, '\0', sizeof(http_hdr->http_version));
 	*/
 	int i = 0;
-	char my_url[200] = {'\0'}; 
-	char c;
 
 	while ( *hdr_ptr != '\0' ) {            
-		printf("%c\n", *hdr_ptr);
+		//printf("%c\n", *hdr_ptr);
 		
 		switch (curr_state) {
 
@@ -151,34 +148,15 @@ void http_req_hdr_parser(char *buff, struct http_hdr_info *http_req_hdr) {
 				break;
 
 			case req_line:
-				/* url handle */
+				/* get request-target */
 				while ( *(hdr_ptr + i) != ' ' ) {
 					//url_test[i] = *(hdr_ptr + i);
-					http_req_hdr->req_url[i] = *(hdr_ptr + i);
+					http_req_hdr->req_target[i] = *(hdr_ptr + i);
 					i++;
 				}
-				printf("url: %s \n", http_req_hdr->req_url);
+				printf("request target: %s \n", http_req_hdr->req_target);
 				hdr_ptr += i;
 				hdr_ptr++;
-				
-				/* read the file of url */
-				strcpy(my_url, HTML_PATH);
-				strncat(my_url, http_req_hdr->req_url, (i + 1));
-				printf("PWD: %s \n", my_url);
-				fin = fopen(my_url, "r");
-				if(fin == NULL) {
-					printf("Open file failed \n");
-					return;
-				}
-				i = 0;
-				do {
-					c = fgetc(fin);
-					resp_buff[i] = c;
-					i++;	
-				} while( c != EOF );
-				resp_buff[i - 1] = '\0';
-				printf("resp_buff:\n %s \n", resp_buff);
-				fclose(fin);
 				
 				/* http version handle */
   				if ( (*hdr_ptr == 'H') && (*(hdr_ptr + 1) == 'T') && (*(hdr_ptr + 2) == 'T') && (*(hdr_ptr + 3) == 'P') 
@@ -265,21 +243,39 @@ void http_req_process(char *buff, struct http_hdr_info *http_req_hdr) {
 
 	http_req_hdr_parser(buff, http_req_hdr);
 
-	if ( http_req_hdr->http_method == HTTP_METHOD_GET ) {
+	if ( http_req_hdr->req_method == HTTP_METHOD_GET ) {
 		
 		FILE *file_for_GET;
-		if ( (file_for_GET = fopen(, "r")) ) {
+		char file_uri[200] = {'\0'};
+		strcpy(file_uri, HTML_FILE_PATH);
+		strcat(file_uri, http_req_hdr->req_target);
+		printf("PWD: %s \n", file_uri);
+
+		if ( (file_for_GET = fopen(file_uri, "r")) ) {
+			int i = 0;
+			char c;
+
+			do {
+				c = fgetc(file_for_GET);
+				resp_body[i] = c;
+				i++;
+			} while( c != EOF );
+
+			resp_body[i - 1] = '\0';
+			fclose(file_for_GET);
+			printf("resp_body:\n%s\n", resp_body);
 
 		}
 		else {
+			/* not support 301 */
 			http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_FOUND;
 		}
 	}
 	else {
 		// not implement yet
 	}
-	
 
+	return;
 }
 
 
@@ -287,38 +283,35 @@ void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr) {
 
 	//char resp_hdr[2048] = {'\0'};
 	int buff_end;
+	char temp_str[20] = {'\0'};
 
-	/* start line */	
+	/* RFC 3.1.2 status line */	
 	char *http_str = "HTTP/";
 	char *my_http_version = "1.0 ";
+	char *date_str = "Date: ";
+	char *server_info_str = "Server: William-server\r\n";
+	char *len_str = "Accept-Ranges: bytes\r\nContent-Length: ";
+	char *content_type_str = "Content-Type: text/html\r\n";
+
 	strcpy(resp_hdr, http_str);
-	strcat(resp_hdr, my_http_version);
+	strcat(resp_hdr, my_http_version); 
+	
 	//strcat(resp_hdr, http_req_hdr->http_version);
-
+	//if (http_req_hdr == HTTP_STATUS_CODE_OK) {
+		strcat(resp_hdr, "200 OK\r\n");
+	//}
+	strcat(resp_hdr, server_info_str);
+	strcat(resp_hdr, len_str);
+	sprintf(temp_str, "%ld", strlen(resp_body));
+	strcat(resp_hdr, temp_str);
+	strcat(resp_hdr, "\r\n");
+	strcat(resp_hdr, content_type_str);
+	strcat(resp_hdr, "\r\n"); // last CRLF
+	//else if () {}
+	//else {}
 	
 	
-	printf("<<<%s>>>\n", resp_hdr);
-	/* for http */
-	//resp_hdr[0] = 'H'; resp_hdr[1] = 'T'; resp_hdr[2] = 'T'; resp_hdr[3] = 'P'; resp_hdr[4] = '/';
-	//buff_end = 5;
-	/*
-	int x = 0;
-	while( buff_end != 8 ) { // for example: [5]='1', [6]='.', [7]='1'
-		resp_hdr[buff_end] = http_hdr->http_version[x];
-		x++;
-		i++;
-	}*/
-	//strncat(resp_hdr, http_hdr->http_version, 3);	
-	
-	/* for https */
-	// ignore
-
-	/* msg header */
-
-	/* CRLF */
-	//resp_hdr[buff_end] = '\r';
-	//resp_hdr[buff_end] = '\n';
-	//buff_end += 2;
+	printf("<<<\n%s\n>>>\n", resp_hdr);
 
 	/* msg body */
 
@@ -377,7 +370,7 @@ int main(int argc, char **argv) {
 		}
 
 		struct http_hdr_info *http_req_hdr = (struct http_hdr_info *)malloc(sizeof(struct http_hdr_info));
-        	memset(http_req_hdr->req_url, '\0', sizeof(http_req_hdr->req_url));
+        	memset(http_req_hdr->req_target, '\0', sizeof(http_req_hdr->req_target));
         	memset(http_req_hdr->http_version, '\0', sizeof(http_req_hdr->http_version));
 
 		http_req_process(buff, http_req_hdr);
@@ -386,19 +379,20 @@ int main(int argc, char **argv) {
 		http_resp_hdr_fill(resp_hdr, http_req_hdr);
 
 		/* temporary use */
-		char *test = "HTTP/1.0 200 OK\r\nServer: william_server\r\nAccept-Ranges: bytes\r\nContent-Length: 265\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n";
-		char temp[200] = {'\0'};
-		strcpy(temp, test);
-		strncat(temp, resp_buff, strlen(resp_buff));
-		printf("temp string: %s \n strlen: %ld \n", temp, strlen(temp));
-		send(conn_fd, temp, strlen(temp), 0);
-		
+		//char *test = "HTTP/1.0 200 OK\r\nServer: william_server\r\nAccept-Ranges: bytes\r\nContent-Length: 265\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n";
+		//char temp[200] = {'\0'};
+		//strcpy(temp, test);
+
+		strncat(resp_hdr, resp_body, strlen(resp_body));
+		printf("response packet: \n%s \nstrlen: %ld \n", resp_hdr, strlen(resp_body));
+
+		send(conn_fd, resp_hdr, strlen(resp_hdr), 0);
+	
 		close(conn_fd); 
 		printf("socket closed \n");
 	}
 
-	return 0;
-        
+	return 0;        
 }
 
 
