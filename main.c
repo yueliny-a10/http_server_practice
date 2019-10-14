@@ -8,18 +8,19 @@
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <time.h>
 
-/* abandoned code 
 typedef unsigned long long      u64;
 typedef unsigned int            u32;
 typedef unsigned short          u16;
 typedef unsigned char           u8;	
-*/
 
+/*
 #define	   u64	unsigned long long
 #define    u32	unsigned int
 #define    u16	unsigned short
 #define    u8	unsigned char 
+*/
 
 #define HTML_FILE_PATH "/var/www/html"
 
@@ -51,7 +52,7 @@ enum http_request_method {
 	HTTP_METHOD_HEAD,
 	HTTP_METHOD_POST,
 	HTTP_METHOD_PUT,
-	HTTP_METHOD_DELET,
+	HTTP_METHOD_DELETE,
 	HTTP_METHOD_CONNECT,
 	HTTP_METHOD_OPTIONS,
 	HTTP_METHOD_TRACE,
@@ -77,21 +78,14 @@ struct http_hdr_info {
 
 enum http_hdr_state { start, req_line, msg_hdr, msg_body, CR, LF }; 
 
-char resp_body[2048] = {'\0'};
 
+void http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 
-void http_req_hdr_parser(char *buff, struct http_hdr_info *http_req_hdr) {
-
-	printf("%s\n", buff);
+	//printf("%s\n", req_buff);
 	char *hdr_ptr;
-	hdr_ptr = buff;
+	hdr_ptr = req_buff;
 
 	enum http_hdr_state curr_state = start;
-	/*
-	struct http_hdr_info *http_hdr = (struct http_hdr_info *)malloc(sizeof(struct http_hdr_info));
-	memset(http_hdr->req_target, '\0', sizeof(http_hdr->req_target));
-	memset(http_hdr->http_version, '\0', sizeof(http_hdr->http_version));
-	*/
 	int i = 0;
 
 	while ( *hdr_ptr != '\0' ) {            
@@ -103,29 +97,40 @@ void http_req_hdr_parser(char *buff, struct http_hdr_info *http_req_hdr) {
 				/* only implement GET, POST, PUT, CONNECT now*/
 				if ( (*hdr_ptr == 'C') && (*(hdr_ptr + 1) == 'N') && (*(hdr_ptr + 2) == 'N') && (*(hdr_ptr + 3) == 'E')
 					 	   && (*(hdr_ptr + 4) == 'C') && (*(hdr_ptr + 5) == 'T') ) {
-					printf("is CONNECT\n");
+					//printf("is CONNECT\n");
 					http_req_hdr->req_method = HTTP_METHOD_CONNECT;
 					hdr_ptr += 5;
 				}
+				else if ( (*hdr_ptr == 'D') && (*(hdr_ptr + 1) == 'E') && (*(hdr_ptr + 2) == 'L') && (*(hdr_ptr + 3) == 'E') 
+					           && (*(hdr_ptr + 4) == 'T') && (*(hdr_ptr + 5) == 'E') ) {
+					//printf("is DELETE \n");
+					http_req_hdr->req_method = HTTP_METHOD_DELETE;
+					hdr_ptr += 5;
+				}
 				else if ( (*hdr_ptr == 'G') && (*(hdr_ptr + 1) == 'E') && (*(hdr_ptr + 2) == 'T') ) {
-					printf("is GET \n");
+					//printf("is GET \n");
 					http_req_hdr->req_method = HTTP_METHOD_GET;
 					hdr_ptr += 2; 
 				}
+				else if ( (*hdr_ptr == 'H') && (*(hdr_ptr + 1) == 'E') && (*(hdr_ptr + 2) == 'A') && (*(hdr_ptr + 3) == 'D') ) {
+					//printf("is HEAD \n");
+					http_req_hdr->req_method = HTTP_METHOD_HEAD;
+					hdr_ptr += 3;
+				}
 				else if ( *hdr_ptr == 'P' ) {
 					if( (*(hdr_ptr + 1) == 'O') && (*(hdr_ptr + 2) == 'S') && (*(hdr_ptr + 3) == 'T') ) {
-						printf("is POST \n");
+						//printf("is POST \n");
 						http_req_hdr->req_method = HTTP_METHOD_POST;
 						hdr_ptr += 3; 
 					}
 					else if( (*(hdr_ptr + 1) == 'U') && (*(hdr_ptr + 2) == 'T') ) {
-						printf("is PUT \n");
+						//printf("is PUT \n");
 						http_req_hdr->req_method = HTTP_METHOD_PUT;
 						hdr_ptr += 2;
 					}
 					else {
 						http_req_hdr->http_status_code = HTTP_STATUS_CODE_BAD_REQUEST;
-						printf("is bad request \n");
+						//printf("is bad request \n");
 						return;
 					}
 				}
@@ -150,11 +155,10 @@ void http_req_hdr_parser(char *buff, struct http_hdr_info *http_req_hdr) {
 			case req_line:
 				/* get request-target */
 				while ( *(hdr_ptr + i) != ' ' ) {
-					//url_test[i] = *(hdr_ptr + i);
 					http_req_hdr->req_target[i] = *(hdr_ptr + i);
 					i++;
 				}
-				printf("request target: %s \n", http_req_hdr->req_target);
+				//printf("request target: %s \n", http_req_hdr->req_target);
 				hdr_ptr += i;
 				hdr_ptr++;
 				
@@ -168,7 +172,7 @@ void http_req_hdr_parser(char *buff, struct http_hdr_info *http_req_hdr) {
 						http_req_hdr->http_version[i] = *(hdr_ptr + i);
 						i++;	
 					}
-					printf("version: %s \n", http_req_hdr->http_version);
+					//printf("version: %s \n", http_req_hdr->http_version);
 					hdr_ptr += (i - 1); 
 				}
 				else {
@@ -206,9 +210,9 @@ void http_req_hdr_parser(char *buff, struct http_hdr_info *http_req_hdr) {
 
 			case LF:
 				if ( *hdr_ptr == '\n' ) {
-					printf("CRLF \n");
+					//printf("CRLF \n");
 					if ( (*(hdr_ptr + 1) == '\r') && (*(hdr_ptr + 2) == '\n') ) {
-						printf("double CRLF - END \n");
+						//printf("double CRLF - END \n");
 						return;
 					}
 					else
@@ -239,51 +243,20 @@ void file_get() {
 }
 
 
-void http_req_process(char *buff, struct http_hdr_info *http_req_hdr) {
+void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr, char *resp_body) {
 
-	http_req_hdr_parser(buff, http_req_hdr);
+        char temp_str[30] = {'\0'};
 
-	if ( http_req_hdr->req_method == HTTP_METHOD_GET ) {
-		
-		FILE *file_for_GET;
-		char file_uri[200] = {'\0'};
-		strcpy(file_uri, HTML_FILE_PATH);
-		strcat(file_uri, http_req_hdr->req_target);
-		printf("PWD: %s \n", file_uri);
+	// date info 
+	char *wday[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+	char *mon[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+        time_t timep;
+        struct tm *p;
+        time(&timep);
+        p = gmtime(&timep);
 
-		if ( (file_for_GET = fopen(file_uri, "r")) ) {
-			int i = 0;
-			char c;
-
-			do {
-				c = fgetc(file_for_GET);
-				resp_body[i] = c;
-				i++;
-			} while( c != EOF );
-
-			resp_body[i - 1] = '\0';
-			fclose(file_for_GET);
-			printf("resp_body:\n%s\n", resp_body);
-
-		}
-		else {
-			/* not support 301 */
-			http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_FOUND;
-		}
-	}
-	else {
-		// not implement yet
-	}
-
-	return;
-}
-
-
-void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr) {
-
-	//char resp_hdr[2048] = {'\0'};
-	int buff_end;
-	char temp_str[20] = {'\0'};
+	sprintf(temp_str, "%s, %d %s %d %d:%d:%d GMT\r\n", wday[p->tm_wday], p->tm_mday, mon[p->tm_mon], (1900 + p->tm_year),
+							p->tm_hour, p->tm_min, p->tm_sec);
 
 	/* RFC 3.1.2 status line */	
 	char *http_str = "HTTP/";
@@ -300,9 +273,14 @@ void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr) {
 	//if (http_req_hdr == HTTP_STATUS_CODE_OK) {
 		strcat(resp_hdr, "200 OK\r\n");
 	//}
+	
+	// general info
+	strcat(resp_hdr, date_str);
+	strcat(resp_hdr, temp_str); // date
 	strcat(resp_hdr, server_info_str);
 	strcat(resp_hdr, len_str);
-	sprintf(temp_str, "%ld", strlen(resp_body));
+	memset(temp_str, '\0', 30);
+	sprintf(temp_str, "%ld", strlen(resp_body)); // strlen
 	strcat(resp_hdr, temp_str);
 	strcat(resp_hdr, "\r\n");
 	strcat(resp_hdr, content_type_str);
@@ -311,11 +289,58 @@ void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr) {
 	//else {}
 	
 	
-	printf("<<<\n%s\n>>>\n", resp_hdr);
-
-	/* msg body */
-
+	//printf("<<<\n%s\n>>>\n", resp_hdr);
 }
+
+
+void http_req_process(char *req_buff, struct http_hdr_info *http_req_hdr, char *resp_buff) {
+
+	char resp_hdr[2048] = {'\0'};
+	char resp_body[2048] = {'\0'};
+
+        http_req_hdr_parser(req_buff, http_req_hdr);
+
+        if ( http_req_hdr->req_method == HTTP_METHOD_GET || http_req_hdr->req_method == HTTP_METHOD_HEAD ) {
+
+                FILE *file_for_GET;
+                char file_uri[200] = {'\0'};
+                strcpy(file_uri, HTML_FILE_PATH);
+                strcat(file_uri, http_req_hdr->req_target);
+                //printf("PWD: %s \n", file_uri);
+
+                if ( (file_for_GET = fopen(file_uri, "r")) ) {
+                        int i = 0;
+                        char c;
+
+                        do {
+                                c = fgetc(file_for_GET);
+                                resp_body[i] = c;
+                                i++;
+                        } while( c != EOF );
+
+                        resp_body[i - 1] = '\0';
+                        fclose(file_for_GET);
+                        //printf("resp_body:\n%s\n", resp_body);
+
+                }
+                else {
+                        /* not support 301 */
+                        http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_FOUND;
+                }
+        }
+        else {
+                // not implement yet
+        }
+
+	http_resp_hdr_fill(resp_hdr, http_req_hdr, resp_body);
+
+	// combine : resp_buff = resp_hdr + resp_body
+	strcat(resp_buff, resp_hdr);
+	strcat(resp_buff, resp_body);
+
+        return;
+}
+
 
 
 int main(int argc, char **argv) {
@@ -351,6 +376,7 @@ int main(int argc, char **argv) {
 	}
 
 	while (1) {
+
 		cli_addr_len = sizeof(cli_addr);
 		if ( (conn_fd = accept(listen_fd, (struct sockaddr *)(&cli_addr), &cli_addr_len)) < 0 ) {
 			printf("accept() failed \n");
@@ -358,12 +384,13 @@ int main(int argc, char **argv) {
 		}
 
 		int res = 0;
-		char buff[BUFF_SIZE] = {0};
+		char req_buff[BUFF_SIZE] = {0};
+
 		/*
 		 *  If no messages are available at the socket, the receive calls wait
 		 *  for a message to arrive, unless the socket is nonblocking (see fcntl(2))
 		 */
-		res = recv(conn_fd, buff , sizeof(buff), 0);
+		res = recv(conn_fd, req_buff , sizeof(req_buff), 0);
 		if ( res <= 0 ) {
 			printf("recv() failed \n");
 			exit(0);
@@ -373,23 +400,14 @@ int main(int argc, char **argv) {
         	memset(http_req_hdr->req_target, '\0', sizeof(http_req_hdr->req_target));
         	memset(http_req_hdr->http_version, '\0', sizeof(http_req_hdr->http_version));
 
-		http_req_process(buff, http_req_hdr);
+		char resp_buff[2048] = {'\0'};
+		http_req_process(req_buff, http_req_hdr, resp_buff);
 
-		char resp_hdr[2048] = {'\0'};
-		http_resp_hdr_fill(resp_hdr, http_req_hdr);
 
-		/* temporary use */
-		//char *test = "HTTP/1.0 200 OK\r\nServer: william_server\r\nAccept-Ranges: bytes\r\nContent-Length: 265\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n";
-		//char temp[200] = {'\0'};
-		//strcpy(temp, test);
+		send(conn_fd, resp_buff, strlen(resp_buff), 0);	
 
-		strncat(resp_hdr, resp_body, strlen(resp_body));
-		printf("response packet: \n%s \nstrlen: %ld \n", resp_hdr, strlen(resp_body));
-
-		send(conn_fd, resp_hdr, strlen(resp_hdr), 0);
-	
 		close(conn_fd); 
-		printf("socket closed \n");
+		//printf("socket closed \n");
 	}
 
 	return 0;        
