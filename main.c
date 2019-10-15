@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <time.h>
+#include <pthread.h>
 
 typedef unsigned long long      u64;
 typedef unsigned int            u32;
@@ -39,12 +40,17 @@ typedef unsigned char           u8;
 */
 
 /* http status code definition */
-#define HTTP_STATUS_CODE_OK		200
-#define HTTP_STATUS_CODE_BAD_REQUEST	400
-#define HTTP_STATUS_CODE_NOT_FOUND	404
+#define HTTP_STATUS_CODE_OK			200
+#define HTTP_STATUS_CODE_NO_CONTENT		204
+#define HTTP_STATUS_CODE_BAD_REQUEST		400
+#define HTTP_STATUS_CODE_NOT_FOUND		404
+#define HTTP_STATUS_CODE_INTERNEL_SERVER_ERROR	500
+#define HTTP_STATUS_CODE_NOT_IMPLEMENTED	501
 
 #define BUFF_SIZE 1500
 
+
+enum http_hdr_state { start, req_line, msg_hdr, msg_body, CR, LF };
 
 enum http_request_method {
 
@@ -59,6 +65,7 @@ enum http_request_method {
 	HTTP_METHOD_PATCH
 };
 
+
 struct http_hdr_info {
 	
 	/*
@@ -72,11 +79,7 @@ struct http_hdr_info {
 	u32 host_ip;
 	u16 host_port;
 	char *msg_hdr;
- 	
-
 };
-
-enum http_hdr_state { start, req_line, msg_hdr, msg_body, CR, LF }; 
 
 
 void http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
@@ -153,7 +156,7 @@ void http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 				break;
 
 			case req_line:
-				/* get request-target */
+				/* get request-target uri */
 				while ( *(hdr_ptr + i) != ' ' ) {
 					http_req_hdr->req_target[i] = *(hdr_ptr + i);
 					i++;
@@ -232,14 +235,6 @@ void http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
                 
 		hdr_ptr++;
 	}
-	printf("\n");
-			
-}
-
-
-/* get URI file for GET */
-void file_get() {
-
 }
 
 
@@ -290,6 +285,46 @@ void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr, char
 	
 	
 	//printf("<<<\n%s\n>>>\n", resp_hdr);
+	return;
+}
+
+
+/* get URI file for GET */
+void file_get(struct http_hdr_info *http_req_hdr, char *resp_body) {
+
+	FILE *file_for_GET;
+	char file_uri[200] = {'\0'};
+	strcpy(file_uri, HTML_FILE_PATH);
+	strcat(file_uri, http_req_hdr->req_target);
+	//printf("PWD: %s \n", file_uri);
+
+	if ( access( file_uri, F_OK ) != -1 ) {
+		// file exists
+		if ( (file_for_GET = fopen(file_uri, "r")) ) {
+			int i = 0;
+			char c;
+
+			do {
+				c = fgetc(file_for_GET);
+				resp_body[i] = c;
+				i++;
+			} while ( c != EOF );
+
+			resp_body[i - 1] = '\0';
+			fclose(file_for_GET);
+			//printf("resp_body:\n%s\n", resp_body);
+		}
+		else {
+			// file open failed, 500
+			http_req_hdr->http_status_code = HTTP_STATUS_CODE_INTERNEL_SERVER_ERROR;
+		}
+	}
+	else {
+		// file doesn't exsits, 404
+		http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_FOUND;
+	}
+
+	return;
 }
 
 
@@ -300,47 +335,82 @@ void http_req_process(char *req_buff, struct http_hdr_info *http_req_hdr, char *
 
         http_req_hdr_parser(req_buff, http_req_hdr);
 
-        if ( http_req_hdr->req_method == HTTP_METHOD_GET || http_req_hdr->req_method == HTTP_METHOD_HEAD ) {
 
-                FILE *file_for_GET;
-                char file_uri[200] = {'\0'};
-                strcpy(file_uri, HTML_FILE_PATH);
-                strcat(file_uri, http_req_hdr->req_target);
-                //printf("PWD: %s \n", file_uri);
+	switch (http_req_hdr->req_method) {
 
-                if ( (file_for_GET = fopen(file_uri, "r")) ) {
-                        int i = 0;
-                        char c;
+		case HTTP_METHOD_GET:
+			file_get(http_req_hdr, resp_body);
+		        http_resp_hdr_fill(resp_hdr, http_req_hdr, resp_body);
 
-                        do {
-                                c = fgetc(file_for_GET);
-                                resp_body[i] = c;
-                                i++;
-                        } while( c != EOF );
+		        // combine : resp_buff = resp_hdr + resp_body
+       			strcat(resp_buff, resp_hdr);
+       			strcat(resp_buff, resp_body);
+			break;
 
-                        resp_body[i - 1] = '\0';
-                        fclose(file_for_GET);
-                        //printf("resp_body:\n%s\n", resp_body);
+		case HTTP_METHOD_HEAD:
+			break;
 
-                }
-                else {
-                        /* not support 301 */
-                        http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_FOUND;
-                }
-        }
-        else {
-                // not implement yet
-        }
+		case HTTP_METHOD_POST:
+       		case HTTP_METHOD_PUT:
+        	case HTTP_METHOD_DELETE:
+        	case HTTP_METHOD_CONNECT:
+        	case HTTP_METHOD_OPTIONS:
+        	case HTTP_METHOD_TRACE:
+        	case HTTP_METHOD_PATCH:
+			// 501 Not Implemented
+			http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_IMPLEMENTED;
+			printf("not implement yet \n");
+			break;
 
+		default:
+			printf("No this HTTP_METHOD \n");
+			break;
+	}
+/*
 	http_resp_hdr_fill(resp_hdr, http_req_hdr, resp_body);
 
 	// combine : resp_buff = resp_hdr + resp_body
 	strcat(resp_buff, resp_hdr);
 	strcat(resp_buff, resp_body);
-
+*/
         return;
 }
 
+// rename func name later
+void *thd_test(void *fd) {
+
+	int *arg = (int *)fd;
+	int conn_fd = *arg;
+	int res = 0;
+	char req_buff[BUFF_SIZE] = {0};
+
+	//printf("Thread: %lu\n", pthread_self());
+
+	/*
+	 *  If no messages are available at the socket, the receive calls wait
+	 *  for a message to arrive, unless the socket is nonblocking (see fcntl(2))
+	 */
+	res = recv(conn_fd, req_buff , sizeof(req_buff), 0);
+	if ( res <= 0 ) {
+		printf("recv() failed \n");
+		exit(0);
+	}
+
+	struct http_hdr_info *http_req_hdr = (struct http_hdr_info *)malloc(sizeof(struct http_hdr_info));
+	memset(http_req_hdr->req_target, '\0', sizeof(http_req_hdr->req_target));
+	memset(http_req_hdr->http_version, '\0', sizeof(http_req_hdr->http_version));
+
+	char resp_buff[2048] = {'\0'};
+	http_req_process(req_buff, http_req_hdr, resp_buff);
+
+
+	send(conn_fd, resp_buff, strlen(resp_buff), 0);
+
+	close(conn_fd);
+	//printf("Thread: %lu socket closed \n", pthread_self());
+	
+	return 0;
+}
 
 
 int main(int argc, char **argv) {
@@ -375,21 +445,25 @@ int main(int argc, char **argv) {
 		printf("listening ... \n");
 	}
 
+
+	//pthread_t tid_array[10];
+	//int thd_idx;	
+
 	while (1) {
 
 		cli_addr_len = sizeof(cli_addr);
-		if ( (conn_fd = accept(listen_fd, (struct sockaddr *)(&cli_addr), &cli_addr_len)) < 0 ) {
+		if ( (conn_fd = accept(listen_fd, (struct sockaddr *)(&cli_addr), (socklen_t *)&cli_addr_len)) < 0 ) {
 			printf("accept() failed \n");
 			exit(0);
 		}
 
-		int res = 0;
-		char req_buff[BUFF_SIZE] = {0};
+		pthread_t t;
+		pthread_create(&t, NULL, thd_test, (void *)&conn_fd);
+
+		//int res = 0;
+		//char req_buff[BUFF_SIZE] = {0};
 
 		/*
-		 *  If no messages are available at the socket, the receive calls wait
-		 *  for a message to arrive, unless the socket is nonblocking (see fcntl(2))
-		 */
 		res = recv(conn_fd, req_buff , sizeof(req_buff), 0);
 		if ( res <= 0 ) {
 			printf("recv() failed \n");
@@ -407,7 +481,7 @@ int main(int argc, char **argv) {
 		send(conn_fd, resp_buff, strlen(resp_buff), 0);	
 
 		close(conn_fd); 
-		//printf("socket closed \n");
+		*/
 	}
 
 	return 0;        
