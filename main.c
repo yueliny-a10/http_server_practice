@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <signal.h>
 #include <time.h>
 #include <pthread.h>
 
@@ -25,22 +26,38 @@ typedef unsigned char           u8;
 */
 
 #define HTML_FILE_PATH "/var/www/html"
+//#define HTML_FILE_PATH "/home/yueliny/http-serv"
+//#define ABSOLUTE_PATH  "/home/yueliny/http-serv"
 
-char *str_404 = "<!doctype html>\n    \
-<html><head>\n 			      \
-<title>404 Not Found</title>\n        \
-</head><body>\n			      \
-<h1>Not Found</h1>\n                  \
-<address>William Server</address>\n   \
+char *str_404 = "<!doctype html>\n  \
+<html><head>\n    \
+<title>404 Not Found</title>\n  \
+</head><body>\n    \
+<h1>Not Found</h1>\n      \
+<address>William Server</address>\n  \
 </body></html>\n";
 
+char status_code_str_arr[10][40] = {
+
+    "200 OK\r\n",
+    "201 Created\r\n",
+    "202 Accepted\r\n",
+    "303 See Other\r\n",
+    "400 Bad Request\r\n",
+    "403 Forbidden\r\n",
+    "404 Not Found\r\n",
+    "414 Request-URI Too Long\r\n",
+    "500 Internal Server Error\r\n",
+    "501 Not Implemented\r\n"
+
+};
 
 /* http request method definition */
 /* abandoned code 
-#define GET		0	
+#define GET	    	0	
 #define HEAD		1
 #define POST		2
-#define PUT		3
+#define PUT	    	3
 #define DELET		4
 #define CONNECT		5
 #define OPTIONS		6
@@ -50,18 +67,19 @@ char *str_404 = "<!doctype html>\n    \
 
 /* http status code definition        */
 /* RFC 7231 6.  Response Status Codes */
-#define HTTP_STATUS_CODE_OK			200
-#define HTTP_STATUS_CODE_CREATED		201
-#define HTTP_STATUS_CODE_ACCEPTED		202
-//#define HTTP_STATUS_CODE_NO_CONTENT		204  misunderstanding, so ignore it
-#define HTTP_STATUS_CODE_SEE_OTHER		303
-#define HTTP_STATUS_CODE_BAD_REQUEST		400
-#define HTTP_STATUS_CODE_FORBIDDEN		403
-#define HTTP_STATUS_CODE_NOT_FOUND		404
+/*
+#define HTTP_STATUS_CODE_OK		            	200
+#define HTTP_STATUS_CODE_CREATED	        	201
+#define HTTP_STATUS_CODE_ACCEPTED	        	202
+#define HTTP_STATUS_CODE_NO_CONTENT	        	204  
+#define HTTP_STATUS_CODE_SEE_OTHER      		303
+#define HTTP_STATUS_CODE_BAD_REQUEST        	400
+#define HTTP_STATUS_CODE_FORBIDDEN	        	403
+#define HTTP_STATUS_CODE_NOT_FOUND	        	404
 #define HTTP_STATUS_CODE_REQUEST_URI_TOO_LONG	414
 #define HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR	500
-#define HTTP_STATUS_CODE_NOT_IMPLEMENTED	501
-
+#define HTTP_STATUS_CODE_NOT_IMPLEMENTED    	501
+*/
 
 #define BUFF_SIZE 2048
 
@@ -71,11 +89,9 @@ char *str_404 = "<!doctype html>\n    \
 #define URI_LEN   200    
 
 
-enum http_hdr_state { start, req_line, msg_hdr, msg_body, check_CR, check_LF };
+enum http_hdr_state { method, req_line, msg_hdr, msg_body, check_CR, check_LF };
 
 
-/* prepare for status code array idx like below
-   strncat(resp_hdr, str[status code], strlen[status code])
 enum http_status_code {
 	
 	HTTP_STATUS_CODE_OK = 0,
@@ -89,7 +105,7 @@ enum http_status_code {
 	HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR,
 	HTTP_STATUS_CODE_NOT_IMPLEMENTED
 };
-*/
+
 
 enum http_request_method {
 
@@ -119,6 +135,7 @@ struct http_hdr_info {
 	u32 host_ip;
 	u16 host_port;
 	char *msg_hdr;
+    char *msg_body_ptr;
 };
 
 
@@ -127,6 +144,22 @@ void http_hdr_fields_parse() {
 
 }
 
+/*
+void new_http_req_parser(int conn_fd, struct http_hdr_info *http_req_hdr) {
+    
+    char req_buff[1024] = {'\0'};
+    char *hdr_ptr;
+
+
+    do {
+        recv_num = recv(conn_fd, req_buff , sizeof(req_buff), 0);
+
+
+    } while (recv_num > 0);
+
+    return;
+}
+*/
 
 char *http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 
@@ -134,18 +167,19 @@ char *http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 	char *hdr_ptr;
 	hdr_ptr = req_buff;
 
-	enum http_hdr_state curr_state = start;
+	enum http_hdr_state curr_state = method;
 	int i = 0;
 
-	while ( *hdr_ptr != '\0' ) {            
+
+	while ( *hdr_ptr != '\0' ) { 
 		//printf("%c\n", *hdr_ptr);
 		
 		switch (curr_state) {
 
-			case start:
+			case method:
 				/* only parse GET, DELETE, POST, PUT, CONNECT now*/
-				if ( (*hdr_ptr == 'C') && (*(hdr_ptr + 1) == 'N') && (*(hdr_ptr + 2) == 'N') && (*(hdr_ptr + 3) == 'E')
-					 	   && (*(hdr_ptr + 4) == 'C') && (*(hdr_ptr + 5) == 'T') ) {
+				if ( (*hdr_ptr == 'C') && (*(hdr_ptr + 1) == 'O') && (*(hdr_ptr + 2) == 'N') && (*(hdr_ptr + 3) == 'N')
+					 	   && (*(hdr_ptr + 4) == 'E') && (*(hdr_ptr + 5) == 'C') && (*(hdr_ptr + 6) == 'T') ) {
 					//printf("is CONNECT\n");
 					http_req_hdr->req_method = HTTP_METHOD_CONNECT;
 					hdr_ptr += 5;
@@ -167,7 +201,7 @@ char *http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 					hdr_ptr += 3;
 				}
 				else if ( *hdr_ptr == 'P' ) {
-					if( (*(hdr_ptr + 1) == 'O') && (*(hdr_ptr + 2) == 'S') && (*(hdr_ptr + 3) == 'T') ) {
+					if( ( *(hdr_ptr + 1) == 'O') && (*(hdr_ptr + 2) == 'S') && (*(hdr_ptr + 3) == 'T') ) {
 						//printf("is POST \n");
 						http_req_hdr->req_method = HTTP_METHOD_POST;
 						hdr_ptr += 3; 
@@ -193,7 +227,7 @@ char *http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 				else {  // RFC 7230 3.1.1, response 501
 					http_req_hdr->req_method = HTTP_METHOD_OTHERS;
 					http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_IMPLEMENTED;
-					printf("not implemented \n");
+					printf("not implemented yet \n");
 					return NULL;
 				}
 				
@@ -207,8 +241,8 @@ char *http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 
 					if ( *(hdr_ptr + 1) == '\0' ) { // exception for while loop
 						http_req_hdr->http_status_code = HTTP_STATUS_CODE_BAD_REQUEST;
-                                        	printf("is bad request \n");
-                                        	return NULL;
+                        printf("is bad request \n");
+                        return NULL;
 					}
 				}
 					
@@ -258,12 +292,23 @@ char *http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 				else {
 					http_req_hdr->http_status_code = HTTP_STATUS_CODE_BAD_REQUEST;
 					printf("bad request \n");
+					return NULL;
 				}
+
+				// A sender MUST NOT send whitespace
+				// between the start-line  and the first header field.
+				/*
+				if ( (*(hdr_ptr + 1) == '\r') && (*(hdr_ptr + 2) == '\n') ) {
+					if ( (*(hdr_ptr + 3) == ' ') && (*(hdr_ptr + 4) != '\r') )
+					http_req_hdr->http_status_code = HTTP_STATUS_CODE_BAD_REQUEST;
+					return NULL;
+				}*/
 
 				curr_state = check_CR; 	
 				break;
 
 			case msg_hdr:
+				
 				// need to check? only ascii 0x41 ~ 0x90 here? check RFC?
 				if (*(hdr_ptr + 1) == '\r') // informal code
 					curr_state = check_CR;
@@ -276,7 +321,9 @@ char *http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 				}
 				else if (http_req_hdr->req_method == HTTP_METHOD_POST) {
 					// POST func
-					return hdr_ptr;
+					//return hdr_ptr;
+                    http_req_hdr->msg_body_ptr = hdr_ptr;
+                    return NULL;
 				}
 				else {
 					// ??
@@ -302,7 +349,7 @@ char *http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 						hdr_ptr += 2;
 						curr_state = msg_body;
 					}
-					else
+					else 
 						curr_state = msg_hdr;
 				}
 				else {
@@ -324,17 +371,17 @@ char *http_req_hdr_parser(char *req_buff, struct http_hdr_info *http_req_hdr) {
 }
 
 
-void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr, char *resp_body) {
+void http_resp_hdr_fill(struct http_hdr_info *http_req_hdr, char *resp_hdr) {
 
-        char temp_str[30] = {'\0'};
+    char temp_str[30] = {'\0'};
 
 	// Date info 
 	char *wday[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 	char *mon[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-        time_t timep;
-        struct tm *p;
-        time(&timep);
-        p = gmtime(&timep);
+    time_t timep;
+    struct tm *p;
+    time(&timep);
+    p = gmtime(&timep);
 
 	// at RFC 7231 7.1.1.1.  Date/Time Formats
 	// ex. Sun, 06 Nov 1994 08:49:37 GMT    ; IMF-fixdate
@@ -344,7 +391,7 @@ void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr, char
 	char *http_str = "HTTP/";
 	char *my_http_version = "1.0 ";
 	char *date_str = "Date: ";
-	char *server_info_str = "Server: William-server\r\n";
+	char *server_info_str = "Server: William-Server\r\n";
 	char *len_str = "Accept-Ranges: bytes\r\nContent-Length: ";
 	char *content_type_str = "Content-Type: text/html\r\n";
 
@@ -353,12 +400,8 @@ void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr, char
 	strcpy(resp_hdr, http_str);
 	strcat(resp_hdr, my_http_version); 
 	
-	/*
-	   consider change to the code like below 
-           if (status code is legal) {
-                strncat(resp_hdr, str[status code], strlen[status code]);
-           }
-	*/
+    strcat(resp_hdr, status_code_str_arr[http_req_hdr->http_status_code]); // replace below
+    /*
 	switch (http_req_hdr->http_status_code) {
 
 		case HTTP_STATUS_CODE_OK:
@@ -397,17 +440,39 @@ void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr, char
 			printf("Http status code setting error \n");
 			break;
 	}
-
+    */
 	
 	// general info str fill
 	strcat(resp_hdr, date_str);
 	strcat(resp_hdr, temp_str); // date
 	strcat(resp_hdr, server_info_str);
-	strcat(resp_hdr, len_str);
-	memset(temp_str, '\0', 30);
-	sprintf(temp_str, "%ld", strlen(resp_body)); // strlen
-	strcat(resp_hdr, temp_str);
-	strcat(resp_hdr, "\r\n");
+
+	if ( http_req_hdr->req_method == HTTP_METHOD_GET ) { // for Content-Length info
+
+        if (http_req_hdr->http_status_code == HTTP_STATUS_CODE_OK) {
+            
+            char file_uri[200] = {'\0'};
+            strcpy(file_uri, HTML_FILE_PATH);
+            strcat(file_uri, http_req_hdr->req_target);
+
+            struct stat st;
+            stat(file_uri, &st);
+            strcat(resp_hdr, len_str);
+            memset(temp_str, '\0', 30);
+            sprintf(temp_str, "%ld", st.st_size);
+            strcat(resp_hdr, temp_str);
+            strcat(resp_hdr, "\r\n");
+        }
+        else if (http_req_hdr->http_status_code == HTTP_STATUS_CODE_NOT_FOUND) {
+            strcat(resp_hdr, len_str);
+            memset(temp_str, '\0', 30);
+            sprintf(temp_str, "%ld\r\n", strlen(str_404));
+            strcat(resp_hdr, temp_str);
+        }
+        else if (http_req_hdr->http_status_code == HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR) {
+        } 
+	}
+
 	strcat(resp_hdr, content_type_str);
 	strcat(resp_hdr, "\r\n"); // last CRLF
 	
@@ -416,8 +481,10 @@ void http_resp_hdr_fill(char *resp_hdr, struct http_hdr_info *http_req_hdr, char
 }
 
 
-/* get URI file for GET */
-void file_get(struct http_hdr_info *http_req_hdr, char *resp_body) {
+// GET method
+void get_file(int conn_fd, struct http_hdr_info *http_req_hdr) {
+
+	char resp_buff[2048] = {'\0'};
 
 	FILE *file_for_GET;
 	char file_uri[200] = {'\0'};
@@ -425,215 +492,276 @@ void file_get(struct http_hdr_info *http_req_hdr, char *resp_body) {
 	strcat(file_uri, http_req_hdr->req_target);
 	//printf("PWD: %s \n", file_uri);
 
-	if ( access( file_uri, F_OK ) != -1 ) {
-		// file exists
-		if ( (file_for_GET = fopen(file_uri, "r")) ) {
-			int i = 0;
-			char c;
-
-			do {
-				c = fgetc(file_for_GET);
-				resp_body[i] = c;
-				i++;
-			} while ( c != EOF );
-
-			resp_body[i - 1] = '\0';
-			fclose(file_for_GET);
-			//printf("resp_body:\n%s\n", resp_body);
-			http_req_hdr->http_status_code = HTTP_STATUS_CODE_OK;
-		}
-		else {
-			// file open failed, response: 500 (Internal Server Error)
-			http_req_hdr->http_status_code = HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR;
-		}
-
-		// 204 No Content, i misunderstanding this status
-		//if ( strlen(resp_body) == 0 ) {
-		//	http_req_hdr->http_status_code = HTTP_STATUS_CODE_NO_CONTENT;
-		//}
-	}
-	else {
+	if ( access( file_uri, F_OK ) == -1 ) {
 		// file doesn't exist, reponse: 404 (not found)
 		http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_FOUND;
-		strcpy(resp_body, str_404);
+        http_resp_hdr_fill(http_req_hdr, resp_buff);
+        strcat(resp_buff, str_404);
+		send(conn_fd, resp_buff, strlen(resp_buff), 0);
+		return;
 	}
+
+	file_for_GET = fopen(file_uri, "rb");
+
+	// file open failed, response: 500 (Internal Server Error)
+	if ( file_for_GET == NULL ) {
+		http_req_hdr->http_status_code = HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR;
+		http_resp_hdr_fill(http_req_hdr, resp_buff);
+        send(conn_fd, resp_buff, strlen(resp_buff), 0);
+		return;
+	}
+	else {
+		http_req_hdr->http_status_code = HTTP_STATUS_CODE_OK;
+		http_resp_hdr_fill(http_req_hdr, resp_buff);
+		send(conn_fd, resp_buff, strlen(resp_buff), 0);
+		
+		struct stat st;
+        stat(file_uri, &st);
+		unsigned long count = 0, len;
+
+		do {
+			len = fread(resp_buff, 1, sizeof(resp_buff), file_for_GET);
+			send(conn_fd, resp_buff, len, 0);
+			count += len;
+		} while ( count < st.st_size );
+
+		fclose(file_for_GET);
+	}
+	
+	close(conn_fd);
 
 	return;
 }
 
 
-/* prepare for POST */
-void file_post(struct http_hdr_info *http_req_hdr, char *msg_body_ptr) {
+void resp_head(int conn_fd, struct http_hdr_info *http_req_hdr) {
 
+    char resp_buff[2048] = {'\0'};
+    char file_uri[200] = {'\0'};
+
+    strcpy(file_uri, HTML_FILE_PATH);
+    strcat(file_uri, http_req_hdr->req_target);
+
+    if ( access( file_uri, F_OK ) == -1 ) {
+        // file doesn't exist, reponse: 404 (not found)
+        http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_FOUND;
+        http_resp_hdr_fill(http_req_hdr, resp_buff);
+        send(conn_fd, resp_buff, strlen(resp_buff), 0);
+        close(conn_fd);
+        return;
+    }
+    else {
+        http_req_hdr->http_status_code = HTTP_STATUS_CODE_OK;
+        http_resp_hdr_fill(http_req_hdr, resp_buff);
+        send(conn_fd, resp_buff, strlen(resp_buff), 0);
+        close(conn_fd);
+    }
+    return;
+}
+
+
+// RFC 7231 4.3.3
+// relative status code: 200, 201, 206, 303, 304, 416
+// not condsider Content-Type and content-length yet
+void post_file(int conn_fd,struct http_hdr_info *http_req_hdr) {
+
+    char resp_buff[2048] = {'\0'};
+    
 	FILE *file_for_POST;
 	char file_uri[200] = {'\0'};
 	strcpy(file_uri, HTML_FILE_PATH);
 	strcat(file_uri, http_req_hdr->req_target);
 
-	if ( access( file_uri, F_OK ) == -1 ) {
-		// file doesn't exist, create/write a new file
-		if ( (file_for_POST = fopen(file_uri, "w")) ) {
-			//printf("file_POST start\n");
-			while ( *msg_body_ptr != '\0' ) {
-				fputc(*msg_body_ptr, file_for_POST);
-				msg_body_ptr++;	
-			}
-			fclose(file_for_POST);
-			//printf("file_post over\n");
+    if ( http_req_hdr->msg_body_ptr != NULL ) {
 
-			// response 201 (Created)
-			http_req_hdr->http_status_code = HTTP_STATUS_CODE_CREATED;
-		}
-		else {
-			// file open failed, response 500 (Internal Server Error) 
-			http_req_hdr->http_status_code = HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR;
-			//printf("file_post() file open failed\n");
-		}
-	}
-	else {
-		// file already exist, response 303 (See Other) 
-		http_req_hdr->http_status_code = HTTP_STATUS_CODE_SEE_OTHER;
-	}
+        // file doesn't exist, create/write a new file
+        if ( access( file_uri, F_OK ) == -1 ) {
+
+            if ( (file_for_POST = fopen(file_uri, "w")) ) {
+                //printf("file_POST start\n");
+                while ( *http_req_hdr->msg_body_ptr != '\0' ) {
+                    fputc(*http_req_hdr->msg_body_ptr, file_for_POST);
+                    http_req_hdr->msg_body_ptr++;	
+                }
+                fclose(file_for_POST);
+                //printf("file_post over\n");
+
+                // response 201 (Created)
+                http_req_hdr->http_status_code = HTTP_STATUS_CODE_CREATED;
+            }
+            else {
+                // file open failed, response 500 (Internal Server Error) 
+                http_req_hdr->http_status_code = HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR;
+                //printf("file_post() file open failed\n");
+            }
+        }
+        else {
+            // file already exist, response 303 (See Other) 
+            http_req_hdr->http_status_code = HTTP_STATUS_CODE_SEE_OTHER;
+        }
+
+        http_resp_hdr_fill(http_req_hdr, resp_buff);
+    }
+    else {
+        // if (body is null)
+    }
+
+    send(conn_fd, resp_buff, strlen(resp_buff), 0);
+    close(conn_fd);
 
 	return;
 }
 
 
 // RFC 7231 4.3.5
-// it doesn't describe the situation when the target shouldn't be remove
-// i used the 403 for response
-void file_delete(struct http_hdr_info *http_req_hdr, char *resp_body) {
+// relative status code: 202, 204
+void delete_file(int conn_fd, struct http_hdr_info *http_req_hdr) {
 	
+    char resp_buff[2048] = {'\0'};
 	char file_uri[200] = {'\0'};
-        strcpy(file_uri, HTML_FILE_PATH);
-        strcat(file_uri, http_req_hdr->req_target);
+
+    strcpy(file_uri, HTML_FILE_PATH);
+    strcat(file_uri, http_req_hdr->req_target);
 
 	struct stat statbuf;
 	if ( lstat(file_uri, &statbuf) == -1 ) {
 		// file doesn't exist, reponse: 404 (not found)
 		http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_FOUND;
-                strcpy(resp_body, str_404);
-		perror("stat");
-		return;
 	}
-	if ( S_ISDIR(statbuf.st_mode) ) {
-		// is dir, not file, response 403 (Forbidden)
-		http_req_hdr->http_status_code = HTTP_STATUS_CODE_FORBIDDEN;
-	}
-	else {
-		// is file
-		if ( S_ISREG(statbuf.st_mode) ) {
-			// is regular file
-			remove(file_uri);
-			// file remove success, response 202 (Accepted)
-			http_req_hdr->http_status_code = HTTP_STATUS_CODE_ACCEPTED;
-		}
-		else {
-			// not regular file, response 403 (Forbidden)
-			http_req_hdr->http_status_code = HTTP_STATUS_CODE_FORBIDDEN;
-		}
-	}
+    else {
+        if ( S_ISDIR(statbuf.st_mode) ) {
+            // is dir, not file, response 403 (Forbidden)
+            http_req_hdr->http_status_code = HTTP_STATUS_CODE_FORBIDDEN;
+        }
+        else {
+            // is file
+            if ( S_ISREG(statbuf.st_mode) ) {
+                // is regular file
+                remove(file_uri);
+                // file remove success, response 202 (Accepted)
+                http_req_hdr->http_status_code = HTTP_STATUS_CODE_ACCEPTED;
+            }
+            else {
+                // not regular file, response 403 (Forbidden)
+                // it doesn't describe the situation when the target shouldn't be remove
+                // so i used the 403 for response
+                http_req_hdr->http_status_code = HTTP_STATUS_CODE_FORBIDDEN;
+            }
+        }
+    }
+
+    http_resp_hdr_fill(http_req_hdr, resp_buff);
+
+    if (http_req_hdr->http_status_code == HTTP_STATUS_CODE_NOT_FOUND) {
+        strcat(resp_buff, str_404);
+    }
+
+    send(conn_fd, resp_buff, strlen(resp_buff), 0);
+    close(conn_fd);
 
 	return;
 }
 
 
-void http_req_process(char *req_buff, char *resp_buff) {
+// Response :501 Not Implemented
+// also for HTTP_METHOD_OTHERS
+void resp_not_impl(int conn_fd, struct http_hdr_info *http_req_hdr) {
 
-	char resp_hdr[2048] = {'\0'};
-	char resp_body[2048] = {'\0'};
+    char resp_buff[2048] = {'\0'};
 
-        struct http_hdr_info *http_req_hdr = malloc(sizeof(struct http_hdr_info));
+    http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_IMPLEMENTED;
+    http_resp_hdr_fill(http_req_hdr, resp_buff);
+    send(conn_fd, resp_buff, strlen(resp_buff), 0);
+    close(conn_fd);
+    return;
+}
 
-	// malloc failed
-	if (http_req_hdr == NULL) {
+
+void (*http_method_fn[])(int conn_fd, struct http_hdr_info *http_req_hdr) = {
+
+    get_file,
+    resp_head,
+    post_file,
+    resp_not_impl, //PUT
+    delete_file,
+    resp_not_impl, //CONNECT
+    resp_not_impl, //OPTIONS
+    resp_not_impl, //TRACE
+    resp_not_impl, //PATCH
+    resp_not_impl  //OTHERS
+};
+
+
+
+void http_req_process(void *fd /*int conn_fd, char *req_buff*/) {
+
+    int conn_fd = (intptr_t)fd;
+    int res = 0;
+    char req_buff[BUFF_SIZE] = {0};
+
+    struct http_hdr_info *http_req_hdr = malloc(sizeof(struct http_hdr_info));
+
+	if (http_req_hdr == NULL) { // malloc failed
 		printf("malloc failed - *http_req_hdr \n");
 		return;
 	}
 	memset(http_req_hdr, 0, sizeof(struct http_hdr_info));
 
+    res = recv(conn_fd, req_buff , sizeof(req_buff), 0);
+    if ( res < 0 ) { 
+        printf("recv() failed \n");
+        printf("errno : %d, %s \n", errno, strerror(errno));
+        exit(0);
+    }
 
-	char *msg_body_ptr;
-        msg_body_ptr = http_req_hdr_parser(req_buff, http_req_hdr);
+    http_req_hdr_parser(req_buff, http_req_hdr);
+    http_method_fn[http_req_hdr->req_method](conn_fd, http_req_hdr);
 
-
+    /*
 	switch (http_req_hdr->req_method) {
-
+		
 		case HTTP_METHOD_GET:
-			file_get(http_req_hdr, resp_body);
-		        http_resp_hdr_fill(resp_hdr, http_req_hdr, resp_body);
-
-		        // combine : resp_buff = resp_hdr + resp_body
-       			strcat(resp_buff, resp_hdr);
-       			strcat(resp_buff, resp_body);
+			get_file(conn_fd, http_req_hdr);
 			break;
 
 		case HTTP_METHOD_HEAD:
-			http_req_hdr->http_status_code = HTTP_STATUS_CODE_OK;
-			http_resp_hdr_fill(resp_hdr, http_req_hdr, resp_body);
-			strcat(resp_buff, resp_hdr);
+            resp_head(conn_fd, http_req_hdr);
 			break;
 
 		case HTTP_METHOD_POST:
-			// RFC 7231 4.3.3
-			// relative status code: 200, 201, 206, 303, 304, 416
-
-			// not condsider Content-Type and content-length yet
-			if ( msg_body_ptr != NULL ) {
-				file_post(http_req_hdr, msg_body_ptr);
-				http_resp_hdr_fill(resp_hdr, http_req_hdr, resp_body);
-				strcat(resp_buff, resp_hdr);
-			}
-			else {
-				// if (body is null)
-			}
-			
+            post_file(conn_fd, http_req_hdr);
 			break;
 
 		case HTTP_METHOD_DELETE:
-			// RFC 7231 4.3.5
-			// relative status code: 202, 204
-			file_delete(http_req_hdr, resp_body);
-			http_resp_hdr_fill(resp_hdr, http_req_hdr, resp_body);
-			strcat(resp_buff, resp_hdr);
-			strcat(resp_buff, resp_body);
+			delete_file(conn_fd, http_req_hdr);
 			break;
 
-       		case HTTP_METHOD_PUT:
-        	case HTTP_METHOD_CONNECT:
-        	case HTTP_METHOD_OPTIONS:
-        	case HTTP_METHOD_TRACE:
-        	case HTTP_METHOD_PATCH:
-			// Response :501 Not Implemented
-			http_req_hdr->http_status_code = HTTP_STATUS_CODE_NOT_IMPLEMENTED;
-			http_resp_hdr_fill(resp_hdr, http_req_hdr, resp_body);
-			strcat(resp_buff, resp_hdr);
-			printf("This HTTP_METHOD not implemented \n");
-			break;
+        case HTTP_METHOD_PUT:
+        case HTTP_METHOD_CONNECT:
+        case HTTP_METHOD_OPTIONS:
+        case HTTP_METHOD_TRACE:
+        case HTTP_METHOD_PATCH:
+            resp_not_impl(conn_fd, http_req_hdr);
+            break;
 
-		// for HTTP_METHOD_OTHERS
-		default: 
-			http_resp_hdr_fill(resp_hdr, http_req_hdr, resp_body);
-			strcat(resp_buff, resp_hdr);
-			printf("This HTTP_METHOD not implemented \n");
+		default:
+            resp_not_impl(conn_fd, http_req_hdr);
 			break;
 	}
+    */
 
 	free(http_req_hdr);
-        return;
+    return;
 }
 
 
-// fix later
-// this code can not handle large header or payload
-// should change to streaming process
 void *thd_for_recv_send(void *fd) {
 
 	int conn_fd = (intptr_t)fd;
 	int res = 0;
 	char req_buff[BUFF_SIZE] = {0};
 
-	printf("conn_fd of thd_test: %d\n", conn_fd);
+	//printf("conn_fd of thd_test: %d\n", conn_fd);
 	//printf("Thread: %lu\n", pthread_self());
 
 	/*  Linux manual:
@@ -641,30 +769,135 @@ void *thd_for_recv_send(void *fd) {
 	 *  for a message to arrive, unless the socket is nonblocking (see fcntl(2))
 	 */
 	res = recv(conn_fd, req_buff , sizeof(req_buff), 0);
+	if ( res < 0 ) {
+		printf("recv() failed \n");
+        printf("errno : %d, %s \n", errno, strerror(errno));
+        fflush(stdout);
+        exit(0);
+	}
 
 	// recv() return 0 only when
 	// 	1. request a 0-byte buffer
 	// 	2. the other peer has disconnected
-	if ( res < 0 ) {
-		printf("recv() failed \n");
-		printf("errno : %d, %s \n", errno, strerror(errno));
-		exit(0);
-	}
+	/*
+	do {
+		res = recv(conn_fd, req_buff , sizeof(req_buff), 0);
+		if ( res > 0 ) { // return the number of bytes received
 
-	char resp_buff[BUFF_SIZE] = {'\0'};
-	http_req_process(req_buff, resp_buff);
+		}
+		else if ( res == 0 ) { // return 0 when the peer has performed an orderly shutdown
+			printf("the remote side has shut down the connection gracefully \n");
+		}
+		else {  // res < 0, return -1 if an error occurred
+			printf("recv() failed \n");
+                	printf("errno : %d, %s \n", errno, strerror(errno));
+                	exit(0);
+		}
+		
 
+	} while ( res > 0 );
+	*/
 
-	send(conn_fd, resp_buff, strlen(resp_buff), 0);
+	//http_req_process(conn_fd, req_buff);
 
-	close(conn_fd);
 	//printf("Thread: %lu socket closed \n", pthread_self());
-	
 	return 0;
 }
 
 
+typedef struct task_queue_node {
+
+    int *conn_fd;
+    int head;
+    int tail;
+    int size;
+
+} task_q;
+
+
+task_q *init_task_queue(int queue_size) {
+    
+    task_q *queue  = malloc( sizeof(task_q) );
+    queue->conn_fd = malloc( sizeof(int) * queue_size );
+    queue->head = 0;
+    queue->tail = 0;
+    queue->size = queue_size;
+
+    return queue;
+}
+
+
+void enqueue_into_task_q(task_q *q, int conn_fd) {
+
+    while ( ((q->head + 1) % q->size) == q->tail ) {
+        //printf("queue is full, blocking!!\n");
+    }
+
+    //printf("push\n");
+    // push
+    q->conn_fd[q->head] = conn_fd;
+    // move index to next position
+    q->head = (q->head + 1) % q->size;
+
+    return;
+}
+
+
+int dequeue_from_task_q(task_q *q) {
+
+    int old_index = q->tail;
+    int new_index = (old_index + 1) % q->size;
+
+    // if empty, return 0;
+    if ( old_index == q->head ) {
+        //printf("queue is empty\n");
+        //printf("Thread: %lu\n", pthread_self());
+        return 0;
+    }
+
+    if ( !__sync_bool_compare_and_swap(&q->tail, old_index, new_index) ) {
+        //printf("==================CAS lose==================\n");
+        return -1;
+    }
+
+    // get data
+    //printf("get fd %d\n", q->conn_fd[old_index]);
+    return q->conn_fd[old_index];
+}
+
+
+void *take_a_task(void *queue) {
+    
+    task_q *q = (task_q *)queue;
+    int conn_fd;
+
+    while (1) {
+        conn_fd = dequeue_from_task_q(q);
+        if ( conn_fd <= 0 ) {
+            //usleep(100);
+        }
+        else {
+            //printf("take 1 job\n");
+            //thd_for_recv_send( (void *)(intptr_t)conn_fd );
+            //printf("take_a_task %d\n", conn_fd);
+            http_req_process( (void *)(intptr_t)conn_fd );
+        }
+    }
+}
+
+
+void signal_handler(int sig) {
+
+    if (sig == SIGPIPE) {
+        printf("the peer already closed\n");
+    }
+    return;
+}
+
+
 int main(int argc, char **argv) {
+
+    signal(SIGPIPE, SIG_IGN);
 
 	int listen_fd, conn_fd;
 	int cli_addr_len;
@@ -681,7 +914,15 @@ int main(int argc, char **argv) {
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
 	serv_addr.sin_port = htons(12345);
 	
+    int yes = 1;
 	int ret;
+
+    // for bind() failed: -1, errno : 98 (Address/Port already in use)
+    if ( setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes) )) {
+        perror("setsockopt() failed \n");
+        exit(0);
+    }
+
 	if ( (ret = bind(listen_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) != 0 ) {
 		printf("bind() failed: %d \n", ret);
 		printf("errno : %d \n", errno);
@@ -697,22 +938,34 @@ int main(int argc, char **argv) {
 	}
 
 
-	//pthread_t tid_array[10];
-	//int thd_idx;	
+    int queue_size = 20;
+    task_q *tq = init_task_queue(queue_size); 
+
+    pthread_t t1, t2, t3, t4;
+    pthread_create(&t1, NULL, take_a_task, (void *)tq);
+    pthread_create(&t2, NULL, take_a_task, (void *)tq);
+    pthread_create(&t3, NULL, take_a_task, (void *)tq);
+    pthread_create(&t4, NULL, take_a_task, (void *)tq);
 
 	while (1) {
 
 		cli_addr_len = sizeof(cli_addr);
 		if ( (conn_fd = accept(listen_fd, (struct sockaddr *)(&cli_addr), (socklen_t *)&cli_addr_len)) < 0 ) {
 			printf("accept() failed \n");
-			exit(0);
+            fflush(stdout);
+			//exit(0);
 		}
+        else {
+            //printf("conn_fd of accept: %d\n", conn_fd);
+            enqueue_into_task_q(tq, conn_fd);
+            //printf("enqueue: %d\n", conn_fd);
+        }
 
-		// condsider thread pool later
+        /* one conn_fd, on thread
 		printf("conn_fd of accept: %d\n", conn_fd);
 		pthread_t t;
 		pthread_create(&t, NULL, thd_for_recv_send, (void *)(intptr_t)conn_fd);
-
+        */
 	}
 
 	return 0;        
